@@ -1,0 +1,35 @@
+{
+    "name": "Terminal Black",
+    "version": "1.0",
+    "colors": {
+        "background": "#0a0a0a",
+        "foreground": "#00ff00",
+        "accent": "#00ffff",
+        "danger": "#ff5555",
+        "warning": "#ffff55",
+        "success": "#55ff55",
+        "panel": "#111111",
+        "border": "#333333",
+        "text_input": "#000000",
+        "stat_background": "#1a1a1a"
+    },
+    "fonts": {
+        "primary": "Consolas",
+        "secondary": "Monaco",
+        "fallback": "Courier New"
+    },
+    "sizes": {
+        "window_width": 1200,
+        "window_height": 800,
+        "font_size": 11,
+        "stat_font_size": 18,
+        "border_radius": 8
+    },
+    "behavior": {
+        "update_interval_ms": 500,
+        "save_history": true,
+        "max_history_items": 100,
+        "auto_copy_results": false,
+        "word_detection": "advanced"
+    }
+}

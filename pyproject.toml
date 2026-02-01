@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wd-wordcounter"
+version = "1.0.0"
+description = "Minimalist Word Counter Desktop App"
+requires-python = ">=3.8"
+dependencies = [
+    "PyQt6>=6.5.0",
+    "pyqt6-tools>=6.5.0.3.0",
+    "watchdog>=3.0.0"
+]
+
+[project.scripts]
+wd = "WD:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
