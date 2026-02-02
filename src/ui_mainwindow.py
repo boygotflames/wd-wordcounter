@@ -6,12 +6,28 @@ Black terminal aesthetic design
 import sys
 import json
 import time
+import warnings
 from datetime import datetime
 from typing import Dict, Any, Optional
 
 from PyQt6.QtWidgets import *
 from PyQt6.QtCore import *
 from PyQt6.QtGui import *
+
+# ADD THESE IMPORTS
+import re
+import numpy as np
+from collections import Counter
+import matplotlib
+matplotlib.use('QtAgg')
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+import matplotlib.pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap
+import seaborn as sns
+import textstat  # pip install textstat
+from src.export_manager import ExportManager
+from src.theme_manager import ThemeManager
 
 # Import Rust backend
 try:
@@ -29,6 +45,8 @@ class WDMainWindow(QMainWindow):
         self.stats_history = []
         self.last_update_time = 0
         self.update_interval = 500  # ms
+        self.theme_manager = ThemeManager()
+        self.current_theme = "terminal_black"
         self.init_ui()
         self.setup_styles()
         
@@ -49,7 +67,7 @@ class WDMainWindow(QMainWindow):
         # Left panel - Input area
         left_panel = QFrame()
         left_panel.setObjectName("leftPanel")
-        left_layout = QVBoxLayout(left_panel)
+        self.left_layout = QVBoxLayout(left_panel)
         
         # Input label
         input_label = QLabel("📝 PASTE YOUR TEXT")
@@ -85,9 +103,12 @@ class WDMainWindow(QMainWindow):
         button_layout.addStretch()
         
         # Add to left layout
-        left_layout.addWidget(input_label)
-        left_layout.addWidget(self.text_input)
-        left_layout.addLayout(button_layout)
+        self.left_layout.addWidget(input_label)
+        self.left_layout.addWidget(self.text_input)
+        self.left_layout.addLayout(button_layout)
+        
+        # ADD TO init_ui METHOD (after creating buttons)
+        self.create_theme_selector()
         
         # Right panel - Stats area
         right_panel = QFrame()
@@ -121,6 +142,9 @@ class WDMainWindow(QMainWindow):
         # Add spacing
         self.stats_layout.addSpacing(20)
         
+        # ADD READABILITY SCORES SECTION
+        self.create_readability_section()
+        
         # Top words section
         top_words_label = QLabel("🏆 TOP WORDS")
         top_words_label.setObjectName("subsectionLabel")
@@ -138,6 +162,12 @@ class WDMainWindow(QMainWindow):
         self.longest_words_text = QLabel("No data")
         self.longest_words_text.setObjectName("monospaceText")
         self.stats_layout.addWidget(self.longest_words_text)
+        
+        # AFTER CREATING STATS LAYOUT, ADD HEATMAP SECTION
+        self.create_heatmap_section()
+        
+        # ADD AFTER OTHER SECTIONS:
+        self.create_keyword_analysis_section()
         
         # Add stretch at bottom
         self.stats_layout.addStretch()
@@ -401,6 +431,12 @@ class WDMainWindow(QMainWindow):
         else:
             self.longest_words_text.setText("No data")
             
+        # Update heatmap
+        self.update_heatmap()
+        
+        # Update readability
+        self.update_readability_scores(text)
+            
         # Update status
         self.status_bar.showMessage(f"Last updated: {datetime.now().strftime('%H:%M:%S')}")
         
@@ -472,6 +508,402 @@ class WDMainWindow(QMainWindow):
             
         return stats
         
+    def create_heatmap_section(self):
+        """Create heatmap visualization section"""
+        # Add separator
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setObjectName("separator")
+        self.stats_layout.addWidget(separator)
+        
+        # Heatmap label
+        heatmap_label = QLabel("🔥 WORD FREQUENCY HEATMAP")
+        heatmap_label.setObjectName("subsectionLabel")
+        self.stats_layout.addWidget(heatmap_label)
+        
+        # Create matplotlib figure for heatmap
+        self.heatmap_figure = Figure(figsize=(8, 3), dpi=80, facecolor='#0a0a0a')
+        self.heatmap_canvas = FigureCanvas(self.heatmap_figure)
+        self.heatmap_canvas.setMaximumHeight(200)
+        self.heatmap_canvas.setObjectName("heatmapCanvas")
+        self.stats_layout.addWidget(self.heatmap_canvas)
+        
+        # Heatmap controls
+        heatmap_controls = QHBoxLayout()
+        
+        self.heatmap_words_slider = QSlider(Qt.Orientation.Horizontal)
+        self.heatmap_words_slider.setRange(5, 50)
+        self.heatmap_words_slider.setValue(15)
+        self.heatmap_words_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.heatmap_words_slider.valueChanged.connect(self.update_heatmap)
+        
+        controls_label = QLabel("Top Words:")
+        controls_label.setStyleSheet("color: #aaaaaa;")
+        heatmap_controls.addWidget(controls_label)
+        heatmap_controls.addWidget(self.heatmap_words_slider)
+        heatmap_controls.addStretch()
+        
+        self.stats_layout.addLayout(heatmap_controls)
+        
+    def generate_word_heatmap(self, text, top_n=15):
+        """Generate heatmap data for word frequency distribution"""
+        if not text.strip():
+            return None
+        
+        # Split text into chunks
+        chunks = self.split_text_into_chunks(text, num_chunks=20)
+        
+        # Get top N words overall
+        words = self.extract_words(text.lower())
+        word_counts = Counter(words)
+        top_words = [word for word, _ in word_counts.most_common(top_n)]
+        
+        if not top_words:
+            return None
+        
+        # Create frequency matrix
+        freq_matrix = np.zeros((len(top_words), len(chunks)))
+        
+        for i, chunk in enumerate(chunks):
+            chunk_words = self.extract_words(chunk.lower())
+            chunk_counts = Counter(chunk_words)
+            for j, word in enumerate(top_words):
+                freq_matrix[j, i] = chunk_counts.get(word, 0)
+        
+        return {
+            'matrix': freq_matrix,
+            'words': top_words,
+            'chunks': [f"Part {i+1}" for i in range(len(chunks))]
+        }
+        
+    def update_heatmap(self):
+        """Update the heatmap visualization"""
+        text = self.text_input.toPlainText()
+        top_n = self.heatmap_words_slider.value()
+        
+        heatmap_data = self.generate_word_heatmap(text, top_n)
+        
+        if not heatmap_data:
+            self.heatmap_figure.clear()
+            self.heatmap_canvas.draw()
+            return
+        
+        self.heatmap_figure.clear()
+        ax = self.heatmap_figure.add_subplot(111)
+        ax.set_facecolor('#0a0a0a')
+        
+        # Create custom colormap (terminal green theme)
+        colors = ["#0a0a0a", "#006600", "#00aa00", "#00ff00"]
+        cmap = LinearSegmentedColormap.from_list("terminal_green", colors)
+        
+        # Plot heatmap
+        im = ax.imshow(heatmap_data['matrix'], aspect='auto', cmap=cmap, 
+                       interpolation='nearest')
+        
+        # Set labels
+        ax.set_xticks(range(len(heatmap_data['chunks'])))
+        ax.set_xticklabels(heatmap_data['chunks'], rotation=45, ha='right', fontsize=8)
+        ax.set_yticks(range(len(heatmap_data['words'])))
+        ax.set_yticklabels(heatmap_data['words'], fontsize=8)
+        
+        # Styling for dark theme
+        ax.tick_params(axis='x', colors='#aaaaaa')
+        ax.tick_params(axis='y', colors='#aaaaaa')
+        for spine in ax.spines.values():
+            spine.set_color('#333333')
+        
+        # Add colorbar
+        cbar = self.heatmap_figure.colorbar(im, ax=ax)
+        cbar.ax.yaxis.set_tick_params(color='#aaaaaa')
+        plt.setp(plt.getp(cbar.ax.axes, 'yticklabels'), color='#aaaaaa')
+        cbar.set_label('Frequency', color='#aaaaaa')
+        
+        ax.set_title(f'Word Frequency Heatmap (Top {top_n} Words)', fontsize=10, color='#00ff00')
+        
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            try:
+                self.heatmap_figure.tight_layout()
+            except Exception:
+                pass
+        
+        self.heatmap_canvas.draw()
+        
+    def create_readability_section(self):
+        """Create readability analysis section"""
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setObjectName("separator")
+        self.stats_layout.addWidget(separator)
+        
+        readability_label = QLabel("📊 READABILITY ANALYSIS")
+        readability_label.setObjectName("subsectionLabel")
+        self.stats_layout.addWidget(readability_label)
+        
+        # Readability scores grid
+        readability_grid = QGridLayout()
+        
+        scores = [
+            ("Flesch Reading Ease", "flesch_ease", self.calculate_flesch_ease),
+            ("Flesch-Kincaid Grade", "flesch_grade", self.calculate_flesch_grade),
+            ("Gunning Fog Index", "gunning_fog", self.calculate_gunning_fog),
+            ("Coleman-Liau Index", "coleman_liau", self.calculate_coleman_liau),
+            ("SMOG Index", "smog", self.calculate_smog),
+            ("Automated Readability", "automated", self.calculate_automated),
+        ]
+        
+        self.readability_widgets = {}
+        
+        for i, (label, key, func) in enumerate(scores):
+            row = i // 2
+            col = (i % 2) * 2
+            
+            # Label
+            lbl = QLabel(label)
+            lbl.setObjectName("readabilityLabel")
+            readability_grid.addWidget(lbl, row, col)
+            
+            # Value
+            val = QLabel("0.0")
+            val.setObjectName("readabilityValue")
+            val.setAlignment(Qt.AlignmentFlag.AlignRight)
+            readability_grid.addWidget(val, row, col + 1)
+            
+            self.readability_widgets[key] = (val, func)
+        
+        self.stats_layout.addLayout(readability_grid)
+        
+        # Readability description
+        self.readability_desc = QLabel("")
+        self.readability_desc.setObjectName("readabilityDesc")
+        self.readability_desc.setWordWrap(True)
+        self.stats_layout.addWidget(self.readability_desc)
+
+    def calculate_flesch_ease(self, text):
+        """Calculate Flesch Reading Ease score"""
+        try:
+            score = textstat.flesch_reading_ease(text)
+            if score < 0: score = 0
+            if score > 100: score = 100
+            return score
+        except:
+            return 0.0
+
+    def calculate_flesch_grade(self, text):
+        """Calculate Flesch-Kincaid Grade Level"""
+        try:
+            return textstat.flesch_kincaid_grade(text)
+        except:
+            return 0.0
+
+    def calculate_gunning_fog(self, text):
+        """Calculate Gunning Fog Index"""
+        try:
+            return textstat.gunning_fog(text)
+        except:
+            return 0.0
+
+    def calculate_coleman_liau(self, text):
+        """Calculate Coleman-Liau Index"""
+        try:
+            return textstat.coleman_liau_index(text)
+        except:
+            return 0.0
+
+    def calculate_smog(self, text):
+        """Calculate SMOG Index"""
+        try:
+            return textstat.smog_index(text)
+        except:
+            return 0.0
+
+    def calculate_automated(self, text):
+        """Calculate Automated Readability Index"""
+        try:
+            return textstat.automated_readability_index(text)
+        except:
+            return 0.0
+
+    def update_readability_scores(self, text):
+        """Update all readability scores"""
+        if not text.strip():
+            for key, (widget, _) in self.readability_widgets.items():
+                widget.setText("0.0")
+            self.readability_desc.setText("")
+            return
+        
+        for key, (widget, func) in self.readability_widgets.items():
+            score = func(text)
+            widget.setText(f"{score:.1f}")
+        
+        # Update description based on Flesch Reading Ease
+        flesch_score = self.calculate_flesch_ease(text)
+        if flesch_score >= 90:
+            level = "Very Easy (5th grade)"
+        elif flesch_score >= 80:
+            level = "Easy (6th grade)"
+        elif flesch_score >= 70:
+            level = "Fairly Easy (7th grade)"
+        elif flesch_score >= 60:
+            level = "Standard (8th-9th grade)"
+        elif flesch_score >= 50:
+            level = "Fairly Difficult (10th-12th grade)"
+        elif flesch_score >= 30:
+            level = "Difficult (College)"
+        else:
+            level = "Very Difficult (College Graduate)"
+        
+        self.readability_desc.setText(
+            f"📚 Reading Level: {level} | Target audience: {self.get_target_audience(flesch_score)}"
+        )
+
+    def get_target_audience(self, score):
+        """Get target audience based on readability score"""
+        if score >= 80:
+            return "Children, casual readers"
+        elif score >= 60:
+            return "General public, blogs"
+        elif score >= 40:
+            return "Academic, professional"
+        else:
+            return "Experts, technical papers"
+
+    def create_keyword_analysis_section(self):
+        """Create keyword density analysis section"""
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setObjectName("separator")
+        self.stats_layout.addWidget(separator)
+        
+        keyword_label = QLabel("🔑 KEYWORD DENSITY")
+        keyword_label.setObjectName("subsectionLabel")
+        self.stats_layout.addWidget(keyword_label)
+        
+        # Keyword input
+        keyword_layout = QHBoxLayout()
+        self.keyword_input = QLineEdit()
+        self.keyword_input.setPlaceholderText("Enter keywords (comma separated)...")
+        self.keyword_input.setObjectName("keywordInput")
+        self.keyword_input.textChanged.connect(self.update_keyword_analysis)
+        
+        keyword_layout.addWidget(QLabel("Keywords:"))
+        keyword_layout.addWidget(self.keyword_input)
+        self.stats_layout.addLayout(keyword_layout)
+        
+        # Keyword results table
+        self.keyword_table = QTableWidget()
+        self.keyword_table.setColumnCount(4)
+        self.keyword_table.setHorizontalHeaderLabels(["Keyword", "Count", "Density", "Status"])
+        self.keyword_table.setMaximumHeight(150)
+        self.keyword_table.setObjectName("keywordTable")
+        self.stats_layout.addWidget(self.keyword_table)
+        
+        # SEO recommendations
+        self.seo_recommendations = QLabel("")
+        self.seo_recommendations.setObjectName("seoRecommendations")
+        self.seo_recommendations.setWordWrap(True)
+        self.stats_layout.addWidget(self.seo_recommendations)
+
+    def update_keyword_analysis(self):
+        """Update keyword density analysis"""
+        text = self.text_input.toPlainText()
+        keywords_text = self.keyword_input.text()
+        
+        if not text.strip() or not keywords_text.strip():
+            self.keyword_table.setRowCount(0)
+            self.seo_recommendations.setText("")
+            return
+        
+        keywords = [k.strip().lower() for k in keywords_text.split(',')]
+        words = self.extract_words(text.lower())
+        total_words = len(words)
+        
+        self.keyword_table.setRowCount(len(keywords))
+        
+        from collections import Counter
+        word_counts = Counter(words)
+        
+        optimal_density = 1.0  # 1% optimal keyword density for SEO
+        recommendations = []
+        
+        for i, keyword in enumerate(keywords):
+            count = word_counts.get(keyword, 0)
+            density = (count / total_words * 100) if total_words > 0 else 0
+            
+            # Keyword
+            kw_item = QTableWidgetItem(keyword)
+            self.keyword_table.setItem(i, 0, kw_item)
+            
+            # Count
+            count_item = QTableWidgetItem(str(count))
+            count_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.keyword_table.setItem(i, 1, count_item)
+            
+            # Density
+            density_item = QTableWidgetItem(f"{density:.2f}%")
+            density_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            
+            # Color code based on SEO optimal range
+            if 0.5 <= density <= 2.0:
+                density_item.setForeground(QColor(0, 255, 0))  # Green - optimal
+            elif density < 0.5:
+                density_item.setForeground(QColor(255, 165, 0))  # Orange - low
+            else:
+                density_item.setForeground(QColor(255, 0, 0))  # Red - high
+            
+            self.keyword_table.setItem(i, 2, density_item)
+            
+            # Status
+            if density == 0:
+                status = "❌ Not found"
+                recommendations.append(f"Add keyword '{keyword}'")
+            elif density < 0.5:
+                status = "⚠️ Too low"
+                recommendations.append(f"Increase '{keyword}' usage")
+            elif density > 2.0:
+                status = "⚠️ Too high"
+                recommendations.append(f"Reduce '{keyword}' usage")
+            else:
+                status = "✅ Optimal"
+            
+            status_item = QTableWidgetItem(status)
+            status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.keyword_table.setItem(i, 3, status_item)
+        
+        # Resize columns
+        self.keyword_table.resizeColumnsToContents()
+        
+        # SEO recommendations
+        if recommendations:
+            self.seo_recommendations.setText("💡 Recommendations: " + "; ".join(recommendations[:3]))
+        else:
+            self.seo_recommendations.setText("✅ All keywords are optimally used")
+
+    def extract_words(self, text):
+        """Extract words from text (helper method)"""
+        import re
+        return re.findall(r'\b[a-zA-Z]+\b', text)
+        
+    def split_text_into_chunks(self, text, num_chunks=20):
+        """Split text into roughly equal chunks"""
+        if not text:
+            return []
+        
+        length = len(text)
+        chunk_size = max(1, length // num_chunks)
+        
+        chunks = []
+        for i in range(0, length, chunk_size):
+            chunks.append(text[i:i+chunk_size])
+            
+        # Ensure we don't exceed num_chunks (merge remainder into last chunk)
+        if len(chunks) > num_chunks:
+            last_chunk = "".join(chunks[num_chunks-1:])
+            chunks = chunks[:num_chunks-1]
+            chunks.append(last_chunk)
+            
+        return chunks
+        
     def clear_text(self):
         """Clear the text input"""
         self.text_input.clear()
@@ -492,24 +924,41 @@ class WDMainWindow(QMainWindow):
         if not text.strip():
             QMessageBox.warning(self, "No Data", "No text to export.")
             return
-            
+        
         # Generate stats
         if HAS_RUST:
             stats = wdlib.analyze_text_fast(text)
             stats_dict = json.loads(stats.to_json())
         else:
             stats_dict = self.analyze_with_python(text)
-            
-        # Save to file
-        file_name, _ = QFileDialog.getSaveFileName(
-            self,
-            "Export Statistics",
-            f"word_stats_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-            "JSON Files (*.json);;Text Files (*.txt)"
-        )
         
-        if file_name:
-            with open(file_name, 'w', encoding='utf-8') as f:
-                json.dump(stats_dict, f, indent=2, ensure_ascii=False)
-                
-            QMessageBox.information(self, "Success", f"Statistics exported to {file_name}")
+        # Use ExportManager
+        exporter = ExportManager(self)
+        exporter.export_stats(stats_dict, text)
+        
+    def create_theme_selector(self):
+        """Create theme selection dropdown"""
+        theme_layout = QHBoxLayout()
+        
+        theme_label = QLabel("Theme:")
+        theme_layout.addWidget(theme_label)
+        
+        self.theme_combo = QComboBox()
+        for theme_id, theme_info in self.theme_manager.THEMES.items():
+            self.theme_combo.addItem(theme_info["name"], theme_id)
+        
+        self.theme_combo.setCurrentText("Terminal Black")
+        self.theme_combo.currentIndexChanged.connect(self.change_theme)
+        theme_layout.addWidget(self.theme_combo)
+        
+        theme_layout.addStretch()
+        
+        # Add to left layout
+        self.left_layout.addLayout(theme_layout)
+        
+    def change_theme(self):
+        """Change the application theme"""
+        theme_id = self.theme_combo.currentData()
+        stylesheet = self.theme_manager.apply_theme(QApplication.instance(), theme_id)
+        self.setStyleSheet(stylesheet)
+        self.current_theme = theme_id

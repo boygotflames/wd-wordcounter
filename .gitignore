@@ -1,0 +1,28 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+*.dylib
+*.egg-info/
+.venv/
+venv/
+.env
+
+# --- PyInstaller / build outputs ---
+build/
+dist/
+*.spec
+*.log
+wd_runtime.log
+wd_error_log.txt
+
+# --- Rust ---
+target/
+Cargo.lock
+
+# --- IDE / OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

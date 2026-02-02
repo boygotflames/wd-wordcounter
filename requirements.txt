@@ -1,5 +1,10 @@
-PyQt6
-PyQt6-Qt6
-PyQt6-sip
-pyqt6-tools
-watchdog==3.0.0
+PyQt6>=6.5.0
+watchdog>=3.0.0
+matplotlib>=3.7.2
+seaborn>=0.12.2
+pandas>=2.0.3
+jinja2>=3.1.2
+textstat>=0.7.3
+colorama>=0.4.6
+pygments>=2.15.1
+Pillow>=10.0.0PyQt6-sip>=13.5.0

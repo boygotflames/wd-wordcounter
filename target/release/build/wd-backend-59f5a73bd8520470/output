@@ -1,4 +1,0 @@
-cargo:rerun-if-changed=src/main.rs
-cargo:rustc-link-arg=/DEBUG:NONE
-cargo:rustc-link-arg=/OPT:REF
-cargo:rustc-link-arg=/OPT:ICF
