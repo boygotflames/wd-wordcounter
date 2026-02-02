@@ -18,14 +18,13 @@ No tracking. No telemetry. Works fully offline.
 
 ### Windows (recommended)
 - Download the latest **portable** `Word-Counter.exe` from **Releases**:
-  - https://github.com/boygoflames/wd-wordcounter/releases
+  - https://github.com/boygotflames/wd-wordcounter/releases
 - Double-click → app opens. No terminal.
 
-> Tip: If you later publish an installer, you’ll also find it in Releases.
 
 ### From source (Windows / Linux / macOS)
 ```bash
-git clone https://github.com/boygoflames/wd-wordcounter.git
+git clone https://github.com/boygotflames/wd-wordcounter.git
 cd wd-wordcounter
 pip install -r requirements.txt
 python WD.py
